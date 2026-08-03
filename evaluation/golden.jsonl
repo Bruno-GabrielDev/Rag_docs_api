@@ -1,0 +1,18 @@
+{"id": "q01", "question": "Quantos revisores são necessários para aprovar um pull request?", "expected_docs": ["politica-engenharia.md"], "expected_answer": "Pelo menos dois revisores, sendo um deles do time responsável pelo módulo alterado."}
+{"id": "q02", "question": "Qual a cobertura mínima de testes exigida no portão de qualidade?", "expected_docs": ["politica-engenharia.md"], "expected_answer": "80% de cobertura de linhas e 70% de ramos nos módulos de domínio."}
+{"id": "q03", "question": "Existe code freeze? Quando?", "expected_docs": ["politica-engenharia.md"], "expected_answer": "Sim, das 18h de sexta até as 8h de segunda, exceto para correções de severidade 1."}
+{"id": "q04", "question": "Em que condição o rollback automático é acionado?", "expected_docs": ["politica-engenharia.md"], "expected_answer": "Quando a taxa de erro 5xx passa de 2% por 5 minutos consecutivos."}
+{"id": "q05", "question": "Qual o tempo de resposta para um incidente SEV2?", "expected_docs": ["runbook-incidentes.md"], "expected_answer": "Uma hora."}
+{"id": "q06", "question": "O comandante do incidente pode aplicar a correção?", "expected_docs": ["runbook-incidentes.md"], "expected_answer": "Não. O comandante coordena, registra a linha do tempo e comunica; não executa correções."}
+{"id": "q07", "question": "Qual o prazo para escrever o post-mortem?", "expected_docs": ["runbook-incidentes.md"], "expected_answer": "Até 5 dias úteis, para incidentes SEV1 e SEV2."}
+{"id": "q08", "question": "Como funciona o revezamento do plantão?", "expected_docs": ["runbook-incidentes.md"], "expected_answer": "Turnos de 7 dias, com troca às quartas-feiras."}
+{"id": "q09", "question": "Qual banco de dados o time de backend usa?", "expected_docs": ["onboarding-backend.md"], "expected_answer": "PostgreSQL 16 como banco transacional."}
+{"id": "q10", "question": "Até quando o novato deve abrir o primeiro PR?", "expected_docs": ["onboarding-backend.md"], "expected_answer": "Até o quinto dia útil, com apoio de um padrinho."}
+{"id": "q11", "question": "Que arquitetura os serviços seguem?", "expected_docs": ["onboarding-backend.md"], "expected_answer": "Arquitetura hexagonal, com o domínio isolado de frameworks e injeção de dependência por construtor."}
+{"id": "q12", "question": "A que horas é a daily?", "expected_docs": ["onboarding-backend.md"], "expected_answer": "Às 9h30, com duração de 15 minutos."}
+{"id": "q13", "question": "Se eu abrir um PR gigante de 900 linhas, o que acontece?", "expected_docs": ["politica-engenharia.md"], "expected_answer": "PRs com mais de 400 linhas alteradas devem ser quebrados antes da revisão, salvo migrações geradas por ferramenta."}
+{"id": "q14", "question": "Quem fala com o cliente durante uma queda do sistema?", "expected_docs": ["runbook-incidentes.md"], "expected_answer": "O time de Suporte, usando texto aprovado pelo comandante do incidente."}
+{"id": "q15", "question": "Ninguém respondeu meu PR há três dias. O que eu faço?", "expected_docs": ["politica-engenharia.md"], "expected_answer": "O SLA é de 24 horas úteis para a primeira resposta; passado o prazo, acionar o canal #eng-review-sos."}
+{"id": "q16", "question": "Qual é a política de férias e quantos dias eu tenho?", "expected_docs": [], "unanswerable": true, "expected_answer": "Não encontrei essa informação nos documentos fornecidos."}
+{"id": "q17", "question": "Qual o salário inicial de um desenvolvedor pleno na empresa?", "expected_docs": [], "unanswerable": true, "expected_answer": "Não encontrei essa informação nos documentos fornecidos."}
+{"id": "q18", "question": "Como configurar o Kubernetes do cluster de produção?", "expected_docs": [], "unanswerable": true, "expected_answer": "Não encontrei essa informação nos documentos fornecidos."}
