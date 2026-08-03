@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        # sentence-transformers é pesado e desnecessário no CI: a suíte usa
+        # embeddings determinísticos próprios, sem rede.
+        run: |
+          pip install fastapi uvicorn pydantic pydantic-settings numpy anthropic pypdf
+          pip install pytest pytest-cov httpx ruff
+
+      - name: Lint
+        run: ruff check src tests evaluation
+
+      - name: Testes
+        run: pytest --cov=src --cov-report=term-missing
