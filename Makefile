@@ -19,7 +19,7 @@ eval:
 	python -m evaluation.run_eval
 
 eval-fast:
-	python -m evaluation.run_eval --no-judge
+	python -m evaluation.run_eval --retrieval-only
 
 lint:
 	ruff check src tests evaluation
