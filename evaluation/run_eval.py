@@ -1,9 +1,15 @@
 """Executa a suíte de avaliação sobre o dataset dourado e gera um relatório.
 
-Uso:
-    python -m evaluation.run_eval
-    python -m evaluation.run_eval --no-judge      # só métricas de retrieval (sem custo)
-    python -m evaluation.run_eval --top-k 6       # comparar configurações
+Três modos, do mais barato ao mais completo:
+
+    python -m evaluation.run_eval --retrieval-only   # não chama o LLM, custo zero
+    python -m evaluation.run_eval --no-judge         # gera respostas, sem avaliá-las
+    python -m evaluation.run_eval                    # completo, com LLM-as-judge
+
+O modo --retrieval-only existe porque as duas perguntas mais frequentes durante o
+desenvolvimento ("o trecho certo foi recuperado?" e "o guardrail recusou o que
+devia?") são respondidas sem gerar uma única resposta. Iterar em chunk_size ou
+top_k não precisa custar nada.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ def load_golden(path: Path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def build_report(results: list[dict], top_k: int, judged: bool) -> dict:
+def build_report(results: list[dict], top_k: int, judged: bool, gerou: bool) -> dict:
     answerable = [r for r in results if not r["unanswerable"]]
     unanswerable = [r for r in results if r["unanswerable"]]
 
@@ -42,14 +48,11 @@ def build_report(results: list[dict], top_k: int, judged: bool) -> dict:
         "prompt_version": PROMPT_VERSION,
         "top_k": top_k,
         "n_questions": len(results),
+        "modo": "completo" if judged else ("geração" if gerou else "retrieval-only"),
         "retrieval": {
             f"hit@{top_k}": round(aggregate([r["hit"] for r in answerable]), 3),
             "mrr": round(aggregate([r["mrr"] for r in answerable]), 3),
             f"recall@{top_k}": round(aggregate([r["recall"] for r in answerable]), 3),
-        },
-        "latency_ms": {
-            "p50": round(statistics.median([r["latency_ms"] for r in results]), 1),
-            "max": max(r["latency_ms"] for r in results),
         },
         "guardrail": {
             # Das perguntas sem resposta na base, quantas o sistema recusou
@@ -64,6 +67,12 @@ def build_report(results: list[dict], top_k: int, judged: bool) -> dict:
             ),
         },
     }
+
+    if gerou:
+        report["latency_ms"] = {
+            "p50": round(statistics.median([r["latency_ms"] for r in results]), 1),
+            "max": max(r["latency_ms"] for r in results),
+        }
 
     if judged:
         report["generation"] = {
@@ -82,6 +91,7 @@ def to_markdown(report: dict, results: list[dict]) -> str:
         "# Relatório de avaliação — RAG Docs API",
         "",
         f"- Data: {report['timestamp']}",
+        f"- Modo: {report['modo']}",
         f"- Versão do prompt: `{report['prompt_version']}`",
         f"- top_k: {report['top_k']} · perguntas: {report['n_questions']}",
         "",
@@ -104,18 +114,21 @@ def to_markdown(report: dict, results: list[dict]) -> str:
         "",
         f"- Abstenção correta em perguntas sem resposta: {report['guardrail']['abstention_accuracy']}",
         f"- Abstenção indevida em perguntas respondíveis: {report['guardrail']['false_abstention_rate']}",
-        "",
-        "## Latência",
-        "",
-        f"- p50: {report['latency_ms']['p50']} ms · máx: {report['latency_ms']['max']} ms",
-        "",
-        "## Falhas",
-        "",
     ]
+
+    if "latency_ms" in report:
+        lines += [
+            "",
+            "## Latência",
+            "",
+            f"- p50: {report['latency_ms']['p50']} ms · máx: {report['latency_ms']['max']} ms",
+        ]
+
+    lines += ["", "## Falhas de retrieval", ""]
 
     failures = [r for r in results if not r["unanswerable"] and r["hit"] == 0.0]
     if not failures:
-        lines.append("Nenhuma falha de retrieval.")
+        lines.append("Nenhuma.")
     for failure in failures:
         lines.append(f"- **{failure['question']}** — esperado `{failure['expected_docs']}`, veio `{failure['retrieved_docs']}`")
 
@@ -126,23 +139,47 @@ def main() -> None:
     settings = get_settings()
     parser = argparse.ArgumentParser(description="Avalia o pipeline RAG")
     parser.add_argument("--top-k", type=int, default=settings.top_k)
-    parser.add_argument("--no-judge", action="store_true", help="Pula o LLM-as-judge")
+    parser.add_argument(
+        "--retrieval-only",
+        action="store_true",
+        help="Mede apenas retrieval e guardrail. Não chama o LLM, não custa nada.",
+    )
+    parser.add_argument(
+        "--no-judge", action="store_true", help="Gera as respostas, mas não as avalia."
+    )
     parser.add_argument("--golden", type=Path, default=GOLDEN_PATH)
     args = parser.parse_args()
+
+    if not VectorStore.exists(settings.index_dir):
+        raise SystemExit(
+            f"Índice não encontrado em {settings.index_dir}.\nRode primeiro: make ingest"
+        )
+
+    gerou = not args.retrieval_only
+    if gerou and not settings.anthropic_api_key:
+        raise SystemExit(
+            "ANTHROPIC_API_KEY não configurada no .env.\n"
+            "Para medir apenas retrieval, sem custo de API, use: make eval-fast"
+        )
 
     dataset = load_golden(args.golden)
     store = VectorStore.load(settings.index_dir)
     embeddings = build_embedding_provider(settings)
     retriever = HybridRetriever(store, embeddings, rrf_k=settings.rrf_k)
-    llm = AnthropicLLM(api_key=settings.anthropic_api_key, model=settings.llm_model)
-    pipeline = RAGPipeline(
-        retriever=retriever,
-        llm=llm,
-        top_k=args.top_k,
-        candidate_k=settings.candidate_k,
-        min_score=settings.min_score,
-    )
-    judge = None if args.no_judge else Judge(llm)
+
+    pipeline = None
+    judge = None
+    if gerou:
+        llm = AnthropicLLM(api_key=settings.anthropic_api_key, model=settings.llm_model)
+        pipeline = RAGPipeline(
+            retriever=retriever,
+            llm=llm,
+            top_k=args.top_k,
+            candidate_k=settings.candidate_k,
+            min_score=settings.min_score,
+        )
+        if not args.no_judge:
+            judge = Judge(llm)
 
     results: list[dict] = []
     for i, item in enumerate(dataset, start=1):
@@ -154,7 +191,11 @@ def main() -> None:
             question, top_k=args.top_k, candidate_k=settings.candidate_k
         )
         retrieved_docs = [r.chunk.doc_id for r in retrieved]
-        answer = pipeline.answer(question)
+
+        # O guardrail decide ANTES do LLM, então a abstenção é observável sem
+        # gerar resposta alguma — é o que torna o modo retrieval-only útil.
+        melhor_score = round(retrieved[0].score, 4) if retrieved else 0.0
+        abstencao_por_limiar = not retrieved or retrieved[0].score < settings.min_score
 
         row = {
             "question": question,
@@ -164,25 +205,36 @@ def main() -> None:
             "hit": hit_at_k(retrieved_docs, expected_docs, args.top_k),
             "mrr": reciprocal_rank(retrieved_docs, expected_docs),
             "recall": recall_at_k(retrieved_docs, expected_docs, args.top_k),
-            "abstained": NO_ANSWER in answer.answer,
-            "answer": answer.answer,
-            "n_citations": len(answer.citations),
-            "latency_ms": answer.latency_ms,
+            "melhor_score": melhor_score,
+            "abstained": abstencao_por_limiar,
+            "answer": None,
+            "n_citations": 0,
+            "latency_ms": 0,
             "faithfulness": None,
             "relevance": None,
         }
 
-        if judge and not unanswerable and not row["abstained"]:
-            context = format_context(retrieved)
-            row["faithfulness"] = judge.faithfulness(context, answer.answer)["score"]
-            row["relevance"] = judge.relevance(
-                question, item.get("expected_answer", ""), answer.answer
-            )["score"]
+        if gerou:
+            answer = pipeline.answer(question)
+            row["answer"] = answer.answer
+            row["n_citations"] = len(answer.citations)
+            row["latency_ms"] = answer.latency_ms
+            # Com geração, a abstenção real inclui o caso em que o modelo
+            # recusa mesmo tendo recebido contexto acima do limiar.
+            row["abstained"] = NO_ANSWER in answer.answer
+
+            if judge and not unanswerable and not row["abstained"]:
+                context = format_context(retrieved)
+                row["faithfulness"] = judge.faithfulness(context, answer.answer)["score"]
+                row["relevance"] = judge.relevance(
+                    question, item.get("expected_answer", ""), answer.answer
+                )["score"]
 
         results.append(row)
-        print(f"[{i}/{len(dataset)}] {question[:60]}... hit={row['hit']:.0f}")
+        marca = "ok " if (row["hit"] or unanswerable) else "ERR"
+        print(f"[{i:2d}/{len(dataset)}] {marca} score={melhor_score:.3f}  {question[:52]}")
 
-    report = build_report(results, args.top_k, judged=judge is not None)
+    report = build_report(results, args.top_k, judged=judge is not None, gerou=gerou)
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
