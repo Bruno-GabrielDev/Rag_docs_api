@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
 
     # --- Chunking ---
-    chunk_size: int = 800
-    chunk_overlap: int = 150
+    chunk_size: int = 400
+    chunk_overlap: int = 80
 
     # --- Retrieval ---
     top_k: int = 4
